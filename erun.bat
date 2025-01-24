@@ -1,0 +1,1 @@
+dasm cleanmem/cleanmem.asm -f3 -v0 -obin/cart.bin
