@@ -16,8 +16,10 @@ AfterCleanMem:
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Set background luminance color to yellow (NTSC color code $1E)
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;About NTSC colors: https://en.wikipedia.org/wiki/Television_Interface_Adaptor
+
     lda #$1E       ; Load color code into A register
-    sta COLUBK     ; Store A to memory address $09 (TIA COLUBK)
+    sta COLUBK     ; Store A to memory address $09 background color (TIA COLUBK)
 
     jmp AfterCleanMem      ; Repeat from START
 
