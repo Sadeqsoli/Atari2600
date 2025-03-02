@@ -1,1 +1,0 @@
-stella ../bin/pvpcart.bin
