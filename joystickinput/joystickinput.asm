@@ -77,12 +77,11 @@ DivideLoop:
     sta HMOVE      ; apply the fine position offset
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Let the TIA output the remaining 35 lines of VBLANK
+;; Let the TIA output the remaining 35 lines of VBLANK (37 - 2)
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
     REPEAT 35
         sta WSYNC
     REPEND
-
     lda #0
     sta VBLANK     ; turn VBLANK off
 
