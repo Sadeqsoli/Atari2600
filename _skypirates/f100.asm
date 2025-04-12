@@ -21,9 +21,11 @@ PLColorPtr word    ;pointer to mem address of Player color also P0
 
 ENSpritePtr word      ;pointer to mem address of Enemy sprite also P1
 ENColorPtr word    ;pointer to mem address of Enemy color also P1
+PLAnimOffset byte
+Random byte
+
 
 ;Constants
-
 Player_Height = 9 ; P0 height is 9 byte or rows
 Enemy_Height = 9 ; P1 height is 9 byte or rows
 
@@ -48,6 +50,8 @@ Reset:
     lda #90
     sta ENXPos
 
+    lda #%11010100
+    sta Random      ; Random value = $D4 
 
 
 
@@ -79,7 +83,7 @@ Reset:
 
 
 
-;start scanlines 96 scanlines because of two line kernel
+;start scanlines 96 - 10 scanlines because of two line kernel
 StartFrame:
 
     ;Calculations and task performed in pre-VBLANK
@@ -114,6 +118,18 @@ StartFrame:
     
     sta VBLANK
 
+    ;HUD
+    lda #0                   ; clear TIA registers before each new frame
+    sta PF0
+    sta PF1
+    sta PF2
+    sta GRP0
+    sta GRP1
+    sta COLUPF
+    REPEAT 20
+        sta WSYNC            ; display 20 scanlines where the scoreboard goes
+    REPEND
+
     ;Display 192 scanlines
 GameVisibleLines:
     ;cb to olive 
@@ -135,7 +151,7 @@ GameVisibleLines:
     lda #0
     sta PF2
 
-    ldx #96
+    ldx #86
 .GameLinesLoop:
 .IsInsidePlayerSP:
     txa
@@ -145,9 +161,9 @@ GameVisibleLines:
     bcc .DrawPlayer
     lda #0
 .DrawPlayer:
+    clc
+    adc PLAnimOffset
     tay                     ;transfer to Y to work with pointer
-    ;lda #%00000101          ;Streatch Pattern
-    ;sta NUSIZ0 
     lda (PLSpritePtr),Y     ;load p0 bitmap data from lookup table
     sta WSYNC
     sta GRP0                ;set graphic for player
@@ -177,6 +193,9 @@ GameVisibleLines:
     dex ;X--
     bne .GameLinesLoop 
 
+    lda #0
+    sta PLAnimOffset
+
     ;handling the overscan by turning VBLANK on
     lda #2
     sta VBLANK
@@ -193,22 +212,67 @@ CheckP0Up:
     bit SWCHA
     bne CheckP0Down
     inc PLYPos
+    lda #0
+    sta PLAnimOffset
 CheckP0Down:
     lda #%00100000      ;for down
     bit SWCHA
     bne CheckP0Left
     dec PLYPos
+    lda #0
+    sta PLAnimOffset
 CheckP0Left:
     lda #%01000000      ;for up
     bit SWCHA
     bne CheckP0Right
     dec PLXPos
+    lda Player_Height
+    sta PLAnimOffset
 CheckP0Right:
     lda #%10000000      ;for up
     bit SWCHA
     bne EndInput
     inc PLXPos
+    lda Player_Height
+    sta PLAnimOffset
 EndInput:
+
+
+;update function
+UpdateEnemyYPos:
+    lda ENYPos
+    clc 
+    cmp #0
+    bmi .ResetEnemyPosition
+    dec ENYPos
+    jmp EndPosUpdate
+.ResetEnemyPosition:
+    jsr GetRandomXENPos
+
+EndPosUpdate:
+
+;Obj Collision
+CheckCollisionP0P1:
+    lda #%10000000
+    bit CXPPMM
+    bne .CollisionP0P1
+    jmp CheckCollisionP0PF
+.CollisionP0P1:
+    jsr GameOver
+
+CheckCollisionP0PF:
+    lda #%10000000
+    bit CXP0FB
+    bne .CollisionP0PF
+    jmp EndCollisionFallback
+.CollisionP0PF:
+    jsr GameOver
+
+EndCollisionFallback:
+    sta CXCLR
+
+
+
     ;Loop back to the start a new fresh frame or NEXT Frame
     jmp StartFrame
     
@@ -228,6 +292,35 @@ SetXPos subroutine
     asl
     sta HMP0,Y
     sta RESP0,Y
+    rts
+
+; to handle x position of enemy randomly(Subroutine)
+;Generate a LFSR number, Divide by four to fit in the river, add 30 move right
+GetRandomXENPos subroutine
+    lda Random
+    asl
+    eor Random
+    asl 
+    eor Random
+    asl
+    asl
+    eor Random
+    asl 
+    rol Random
+
+    lsr
+    lsr
+    sta ENXPos
+    lda #30
+    adc ENXPos
+    sta ENXPos
+    lda #96
+    sta ENYPos
+    rts
+
+GameOver subroutine
+    lda #$30
+    sta COLUBK
     rts
 
     ;Lookup tables for sprites in ROM
@@ -255,19 +348,6 @@ PlayerSP1
     .byte #%00001000         ;    #
     .byte #%00001000         ;    #
 
-
-;Color of the Player's sprite as a ship 
-PlayerCL0
-    .byte #$00
-    .byte #$FE
-    .byte #$0C
-    .byte #$0E
-    .byte #$0E
-    .byte #$04
-    .byte #$BA
-    .byte #$0E
-    .byte #$08
-
 EnemySP
     .byte #%00000000         ;
     .byte #%00001000         ;    #
@@ -279,6 +359,28 @@ EnemySP
     .byte #%00001000         ;    #
     .byte #%00011100         ;   ###
 
+;Color of the Player's sprite 
+PlayerCL0
+    .byte #$00
+    .byte #$FE
+    .byte #$0C
+    .byte #$0E
+    .byte #$0E
+    .byte #$04
+    .byte #$BA
+    .byte #$0E
+    .byte #$08
+PlayerCL1
+    .byte #$00
+    .byte #$FE
+    .byte #$0C
+    .byte #$0E
+    .byte #$0E
+    .byte #$04
+    .byte #$0E
+    .byte #$0E
+    .byte #$08
+
 EnemyCL
     .byte #$00
     .byte #$32
@@ -289,7 +391,6 @@ EnemyCL
     .byte #$40
     .byte #$40
     .byte #$40
-
 
 
     ;Complete the ROM size by moving to the last 4 bytes of the ROM
