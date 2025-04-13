@@ -17,17 +17,29 @@ ENYPos byte
 
 ;Player sprites
 PLSpritePtr word      ;pointer to mem address of Player sprite also P0
-PLColorPtr word    ;pointer to mem address of Player color also P0
+PLColorPtr  word    ;pointer to mem address of Player color also P0
 
 ENSpritePtr word      ;pointer to mem address of Enemy sprite also P1
-ENColorPtr word    ;pointer to mem address of Enemy color also P1
+ENColorPtr  word    ;pointer to mem address of Enemy color also P1
 PLAnimOffset byte
-Random byte
+Random      byte
+ScoreSprite byte
+TimerSprite byte
 
+TerrainColor byte
+RiverColor byte
+
+;Hud Vars 2-digit value as BCD
+Score       byte
+Timer       byte
+Temp        byte
+OnesDigitOffset   word
+TensDigitOffset   word
 
 ;Constants
 Player_Height = 9 ; P0 height is 9 byte or rows
 Enemy_Height = 9 ; P1 height is 9 byte or rows
+Digit_Height = 5 ; Numbers for score and timer height is 5 byte or rows
 
 
 
@@ -53,7 +65,10 @@ Reset:
     lda #%11010100
     sta Random      ; Random value = $D4 
 
-
+    lda #0
+    sta Score
+    lda #0
+    sta Timer
 
     ;Start the pointers --> first low then high > little endian architecture
     ;Player sprite and color
@@ -86,17 +101,7 @@ Reset:
 ;start scanlines 96 - 10 scanlines because of two line kernel
 StartFrame:
 
-    ;Calculations and task performed in pre-VBLANK
-    lda PLXPos
-    ldy #0
-    jsr SetXPos     ;set p0 x pos
-
-    lda ENXPos
-    ldy #1
-    jsr SetXPos     ;set p1 x pos
-
-    sta WSYNC
-    sta HMOVE       ;applying the x pos
+    
 
 
     ;turn on VSYNC and VBlank
@@ -112,10 +117,26 @@ StartFrame:
     lda #0
     sta VSYNC
     ;dis 37 lines of VBLANK
-    REPEAT 37 
+    REPEAT 33
         sta WSYNC  
     REPEND
-    
+
+
+    ;Calculations and task performed in pre-VBLANK
+    lda PLXPos
+    ldy #0
+    jsr SetXPos     ;set p0 x pos
+
+    lda ENXPos
+    ldy #1
+    jsr SetXPos     ;set p1 x pos
+
+    jsr CalculateDigits
+
+    sta WSYNC
+    sta HMOVE       ;applying the x pos
+
+    lda #0
     sta VBLANK
 
     ;HUD
@@ -125,18 +146,77 @@ StartFrame:
     sta PF2
     sta GRP0
     sta GRP1
+    sta COLUBK
+    lda #$1c                ;set playfield color to white
     sta COLUPF
-    REPEAT 20
-        sta WSYNC            ; display 20 scanlines where the scoreboard goes
-    REPEND
+    lda #%00000000          ; do not reflect in playfield
+    sta CTRLPF
+
+    ldx Digit_Height
+
+.HUD:
+;;Score
+    ldy TensDigitOffset
+    lda Digits,Y 
+    and #$f0
+    sta ScoreSprite
+    ldy OnesDigitOffset
+    lda Digits,Y 
+    and #$0f
+    ora ScoreSprite
+    sta ScoreSprite
+    sta WSYNC
+    sta PF1
+
+;;Timer
+    ldy TensDigitOffset +1
+    lda Digits,Y 
+    and #$f0
+    sta TimerSprite
+    ldy OnesDigitOffset +1
+    lda Digits,Y 
+    and #$0f
+    ora TimerSprite
+    sta TimerSprite
+
+;;handling PF1 reflection
+    jsr SleepFor12Cycles
+    sta PF1
+    ldy ScoreSprite
+    sta WSYNC
+    
+    sty PF1
+    inc TensDigitOffset
+    inc TensDigitOffset +1
+    inc OnesDigitOffset
+    inc OnesDigitOffset +1
+
+    jsr SleepFor12Cycles
+
+    dex 
+    sta PF1
+    bne .HUD
+
+    sta WSYNC
+
+    lda #0                   ; clear TIA registers before each new frame
+    sta PF0
+    sta PF1
+    sta PF2
+    sta WSYNC
+    sta WSYNC
+
+
+
+
 
     ;Display 192 scanlines
 GameVisibleLines:
-    ;cb to olive 
-    lda  #$82
+    ;Color of background
+    lda  RiverColor
     sta COLUBK
     ;color of the playfield
-    lda #$c2
+    lda TerrainColor
     sta COLUPF
 
     lda #%00000001
@@ -151,7 +231,7 @@ GameVisibleLines:
     lda #0
     sta PF2
 
-    ldx #86
+    ldx #85
 .GameLinesLoop:
 .IsInsidePlayerSP:
     txa
@@ -211,6 +291,9 @@ CheckP0Up:
     lda #%00010000      ;for up
     bit SWCHA
     bne CheckP0Down
+    lda PLYPos
+    cmp #77
+    bpl CheckP0Down
     inc PLYPos
     lda #0
     sta PLAnimOffset
@@ -218,6 +301,9 @@ CheckP0Down:
     lda #%00100000      ;for down
     bit SWCHA
     bne CheckP0Left
+    lda PLYPos
+    cmp #2
+    bmi CheckP0Left
     dec PLYPos
     lda #0
     sta PLAnimOffset
@@ -225,6 +311,9 @@ CheckP0Left:
     lda #%01000000      ;for up
     bit SWCHA
     bne CheckP0Right
+    lda PLXPos
+    cmp #32
+    bmi CheckP0Right
     dec PLXPos
     lda Player_Height
     sta PLAnimOffset
@@ -232,6 +321,9 @@ CheckP0Right:
     lda #%10000000      ;for up
     bit SWCHA
     bne EndInput
+    lda PLXPos
+    cmp #102
+    bpl EndInput
     inc PLXPos
     lda Player_Height
     sta PLAnimOffset
@@ -249,6 +341,23 @@ UpdateEnemyYPos:
 .ResetEnemyPosition:
     jsr GetRandomXENPos
 
+.SetScore_Timer:
+    sed 
+
+    ; inc Score
+    lda Score
+    clc 
+    adc #1
+    sta Score
+    
+    ; inc Timer
+    lda Timer
+    clc 
+    adc #1
+    sta Timer
+
+    cld 
+
 EndPosUpdate:
 
 ;Obj Collision
@@ -256,16 +365,12 @@ CheckCollisionP0P1:
     lda #%10000000
     bit CXPPMM
     bne .CollisionP0P1
-    jmp CheckCollisionP0PF
-.CollisionP0P1:
-    jsr GameOver
 
-CheckCollisionP0PF:
-    lda #%10000000
-    bit CXP0FB
-    bne .CollisionP0PF
+    jsr SetPF_BKColor
+
     jmp EndCollisionFallback
-.CollisionP0PF:
+
+.CollisionP0P1:
     jsr GameOver
 
 EndCollisionFallback:
@@ -317,14 +422,164 @@ GetRandomXENPos subroutine
     lda #96
     sta ENYPos
     rts
-
+;handling after collisions
 GameOver subroutine
-    lda #$30
-    sta COLUBK
+    lda #$cc
+    sta TerrainColor
+    lda #$8c
+    sta RiverColor
+
+    lda #0
+    sta Score
     rts
+;displaying score and timer
+CalculateDigits subroutine
+    ldx #1                  ;If X=1 goes to Timer and X=0 goes to Score
+.PrepareHUD
+
+    lda Score,X             ;load A with Timer 
+    and #$0F                ;masking tens digits
+    sta Temp
+    asl 
+    asl 
+    clc
+    adc Temp
+    sta OnesDigitOffset,X 
+
+    lda Score,X 
+    and #$F0                ;masking Ones digits
+    lsr 
+    lsr 
+    sta Temp
+    lsr 
+    lsr
+    clc 
+    adc Temp
+    sta TensDigitOffset,X
+
+    dex 
+    bpl .PrepareHUD       ;while X is still positive
+
+    rts
+
+SetPF_BKColor subroutine
+
+    lda #$84
+    sta RiverColor
+    lda #$c2
+    sta TerrainColor
+
+    rts
+
+
+
+SleepFor12Cycles subroutine
+    rts
+
+
+
+
 
     ;Lookup tables for sprites in ROM
     ;Sprite of the Player as a ship
+
+Digits:
+    .byte %01110111          ; ### ###
+    .byte %01010101          ; # # # #
+    .byte %01010101          ; # # # #
+    .byte %01010101          ; # # # #
+    .byte %01110111          ; ### ###
+
+    .byte %00010001          ;   #   #
+    .byte %00010001          ;   #   #
+    .byte %00010001          ;   #   #
+    .byte %00010001          ;   #   #
+    .byte %00010001          ;   #   #
+
+    .byte %01110111          ; ### ###
+    .byte %00010001          ;   #   #
+    .byte %01110111          ; ### ###
+    .byte %01000100          ; #   #
+    .byte %01110111          ; ### ###
+
+    .byte %01110111          ; ### ###
+    .byte %00010001          ;   #   #
+    .byte %00110011          ;  ##  ##
+    .byte %00010001          ;   #   #
+    .byte %01110111          ; ### ###
+
+    .byte %01010101          ; # # # #
+    .byte %01010101          ; # # # #
+    .byte %01110111          ; ### ###
+    .byte %00010001          ;   #   #
+    .byte %00010001          ;   #   #
+
+    .byte %01110111          ; ### ###
+    .byte %01000100          ; #   #
+    .byte %01110111          ; ### ###
+    .byte %00010001          ;   #   #
+    .byte %01110111          ; ### ###
+
+    .byte %01110111          ; ### ###
+    .byte %01000100          ; #   #
+    .byte %01110111          ; ### ###
+    .byte %01010101          ; # # # #
+    .byte %01110111          ; ### ###
+
+    .byte %01110111          ; ### ###
+    .byte %00010001          ;   #   #
+    .byte %00010001          ;   #   #
+    .byte %00010001          ;   #   #
+    .byte %00010001          ;   #   #
+
+    .byte %01110111          ; ### ###
+    .byte %01010101          ; # # # #
+    .byte %01110111          ; ### ###
+    .byte %01010101          ; # # # #
+    .byte %01110111          ; ### ###
+
+    .byte %01110111          ; ### ###
+    .byte %01010101          ; # # # #
+    .byte %01110111          ; ### ###
+    .byte %00010001          ;   #   #
+    .byte %01110111          ; ### ###
+
+    .byte %00100010          ;  #   #
+    .byte %01010101          ; # # # #
+    .byte %01110111          ; ### ###
+    .byte %01010101          ; # # # #
+    .byte %01010101          ; # # # #
+
+    .byte %01110111          ; ### ###
+    .byte %01010101          ; # # # #
+    .byte %01100110          ; ##  ##
+    .byte %01010101          ; # # # #
+    .byte %01110111          ; ### ###
+
+    .byte %01110111          ; ### ###
+    .byte %01000100          ; #   #
+    .byte %01000100          ; #   #
+    .byte %01000100          ; #   #
+    .byte %01110111          ; ### ###
+
+    .byte %01100110          ; ##  ##
+    .byte %01010101          ; # # # #
+    .byte %01010101          ; # # # #
+    .byte %01010101          ; # # # #
+    .byte %01100110          ; ##  ##
+
+    .byte %01110111          ; ### ###
+    .byte %01000100          ; #   #
+    .byte %01110111          ; ### ###
+    .byte %01000100          ; #   #
+    .byte %01110111          ; ### ###
+
+    .byte %01110111          ; ### ###
+    .byte %01000100          ; #   #
+    .byte %01100110          ; ##  ##
+    .byte %01000100          ; #   #
+    .byte %01000100          ; #   #
+
 PlayerSP0
     .byte #%00000000         ;
     .byte #%00010100         ;   # #
