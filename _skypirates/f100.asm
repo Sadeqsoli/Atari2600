@@ -14,7 +14,9 @@ PLYPos byte
 ;player1 position
 ENXPos byte
 ENYPos byte
-
+;Missile X,Y Position
+MissileXPos byte
+MissileYPos byte
 ;Player sprites
 PLSpritePtr word      ;pointer to mem address of Player sprite also P0
 PLColorPtr  word    ;pointer to mem address of Player color also P0
@@ -67,8 +69,19 @@ Reset:
 
     lda #0
     sta Score
-    lda #0
     sta Timer
+
+
+    MAC DRAW_MISSILE
+        lda #%00000000
+        cpx MissileYPos      ; compare X (current scanline) with missile Y pos
+        bne .SkipMissileDraw ; if (X != missile Y position), then skip draw
+.DrawMissile:                ; else:
+        lda #%00000010       ;     enable missile 0 display
+        inc MissileYPos      ;     MissileYPos++
+.SkipMissileDraw:
+        sta ENAM0            ; store correct value in the TIA missile register
+    ENDM
 
     ;Start the pointers --> first low then high > little endian architecture
     ;Player sprite and color
@@ -131,6 +144,10 @@ StartFrame:
     ldy #1
     jsr SetXPos     ;set p1 x pos
 
+    lda MissileXPos
+    ldy #2
+    jsr SetXPos     ;set p1 x pos
+
     jsr CalculateDigits
 
     sta WSYNC
@@ -141,16 +158,16 @@ StartFrame:
 
     ;HUD
     lda #0                   ; clear TIA registers before each new frame
+    sta COLUBK
     sta PF0
     sta PF1
     sta PF2
     sta GRP0
     sta GRP1
-    sta COLUBK
+    sta CTRLPF
+
     lda #$1c                ;set playfield color to white
     sta COLUPF
-    lda #%00000000          ; do not reflect in playfield
-    sta CTRLPF
 
     ldx Digit_Height
 
@@ -205,6 +222,7 @@ StartFrame:
     sta PF2
     sta WSYNC
     sta WSYNC
+    sta WSYNC
 
 
 
@@ -212,12 +230,15 @@ StartFrame:
 
     ;Display 192 scanlines
 GameVisibleLines:
-    ;Color of background
-    lda  RiverColor
-    sta COLUBK
+
     ;color of the playfield
     lda TerrainColor
     sta COLUPF
+
+    ;Color of background
+    lda  RiverColor
+    sta COLUBK
+    
 
     lda #%00000001
     sta CTRLPF
@@ -231,13 +252,15 @@ GameVisibleLines:
     lda #0
     sta PF2
 
-    ldx #85
+    ldx #86
 .GameLinesLoop:
+    DRAW_MISSILE    ;macro
+
 .IsInsidePlayerSP:
     txa
     sec
     sbc PLYPos
-    cmp Player_Height       ;are inside the player sprite?
+    cmp #Player_Height       ;are inside the player sprite?
     bcc .DrawPlayer
     lda #0
 .DrawPlayer:
@@ -255,13 +278,14 @@ GameVisibleLines:
     txa
     sec
     sbc ENYPos
-    cmp Enemy_Height       ;are inside the Enemy sprite?
+    cmp #Enemy_Height       ;are inside the Enemy sprite?
     bcc .DrawEnemy
     lda #0
 .DrawEnemy:
     tay                     ;transfer to Y to work with pointer
     lda #%00000101          ;Streatch Pattern
     sta NUSIZ1
+
     lda (ENSpritePtr),Y     ;load p1(Enemy) bitmap data from lookup table
     sta WSYNC
     sta GRP1                ;set graphic for Enemy
@@ -275,6 +299,8 @@ GameVisibleLines:
 
     lda #0
     sta PLAnimOffset
+
+    sta WSYNC
 
     ;handling the overscan by turning VBLANK on
     lda #2
@@ -315,18 +341,30 @@ CheckP0Left:
     cmp #32
     bmi CheckP0Right
     dec PLXPos
-    lda Player_Height
+    lda #Player_Height
     sta PLAnimOffset
 CheckP0Right:
     lda #%10000000      ;for up
     bit SWCHA
-    bne EndInput
+    bne CheckFireButton
     lda PLXPos
     cmp #102
-    bpl EndInput
+    bpl CheckFireButton
     inc PLXPos
-    lda Player_Height
+    lda #Player_Height
     sta PLAnimOffset
+CheckFireButton:
+    lda #%10000000           ; Button 
+    bit INPT4
+    bne EndInput
+    lda PLXPos
+    clc
+    adc #5 
+    sta MissileXPos 
+    lda PLYPos
+    clc
+    adc #8
+    sta MissileYPos 
 EndInput:
 
 
@@ -343,19 +381,11 @@ UpdateEnemyYPos:
 
 .SetScore_Timer:
     sed 
-
-    ; inc Score
-    lda Score
-    clc 
-    adc #1
-    sta Score
-    
     ; inc Timer
     lda Timer
     clc 
     adc #1
     sta Timer
-
     cld 
 
 EndPosUpdate:
@@ -364,14 +394,29 @@ EndPosUpdate:
 CheckCollisionP0P1:
     lda #%10000000
     bit CXPPMM
-    bne .CollisionP0P1
-
+    bne .GameOverLabel
     jsr SetPF_BKColor
+    jmp CheckCollisionM0P1
 
+.GameOverLabel:
+    jsr GameOver
+
+CheckCollisionM0P1:
+    lda #%10000000
+    bit CXM0P
+    bne .CollisionM0P1
     jmp EndCollisionFallback
 
-.CollisionP0P1:
-    jsr GameOver
+.CollisionM0P1:
+    ; inc Score
+    sed
+    lda Score
+    clc 
+    adc #1
+    sta Score
+    cld
+    lda #0
+    sta MissileYPos
 
 EndCollisionFallback:
     sta CXCLR
