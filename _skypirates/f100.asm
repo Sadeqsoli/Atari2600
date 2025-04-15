@@ -150,6 +150,8 @@ StartFrame:
 
     jsr CalculateDigits
 
+    jsr JetSound
+
     sta WSYNC
     sta HMOVE       ;applying the x pos
 
@@ -343,6 +345,16 @@ CheckP0Left:
     dec PLXPos
     lda #Player_Height
     sta PLAnimOffset
+; .GoingLeftSound:
+;     ;volume
+;     lda #1
+;     sta AUDV1     
+;    ;frequency    
+;     lda #6
+;     sta AUDF1
+;     ;control
+;     lda #1
+;     sta AUDC1    
 CheckP0Right:
     lda #%10000000      ;for up
     bit SWCHA
@@ -366,6 +378,7 @@ CheckFireButton:
     adc #8
     sta MissileYPos 
 EndInput:
+
 
 
 ;update function
@@ -421,7 +434,10 @@ CheckCollisionM0P1:
 EndCollisionFallback:
     sta CXCLR
 
-
+    lda #0
+    sta AUDV1
+    sta AUDF1
+    sta AUDC1
 
     ;Loop back to the start a new fresh frame or NEXT Frame
     jmp StartFrame
@@ -521,7 +537,29 @@ SetPF_BKColor subroutine
 SleepFor12Cycles subroutine
     rts
 
+JetSound subroutine
+    ;volume
+    lda #1
+    sta AUDV0
 
+    ;frequency
+    lda PLYPos
+    lsr
+    lsr
+    lsr
+    sta Temp
+    lda #31
+    sec 
+    sbc Temp
+    sta AUDF0
+
+
+    ;control
+    lda #8
+    sta AUDC0
+
+
+    rts
 
 
 
